@@ -6,6 +6,8 @@ How it works:
   2. You give the other side's version as honestly as you can.
   3. The app sends both to the AI with a "no yes-man" system prompt,
      and you get a straight assessment back.
+  4. Keep the conversation going — ask follow-up questions, push back,
+     add new context. The AI remembers everything you told it.
 
 Run it:
   pip install -r requirements.txt
@@ -59,11 +61,13 @@ Rules:
 6. Match the directness level you're given. At every level you're honest; the level only changes the padding. Even at brutal, attack the reasoning, never the person's value.
 7. Be useful, not just right. End every response with a bottom line (2-3 sentences, no hedging) and one concrete next step.
 
-Response format — use these headers:
+Response format for the first assessment — use these headers:
 - **The straight version** — what actually happened, stripped of spin
 - **Where you might be off** — the weakest parts of the user's read
 - **What you're not seeing** — the other side's plausible reality
 - **Bottom line + next step**
+
+Follow-ups: the user can keep asking questions after your assessment. Stay in character — honest, direct, same directness level. Keep answers tight and refer back to the original situation. If a follow-up reveals new facts that change your read, say so plainly. Updating your take when the facts change is honesty, not flip-flopping.
 
 Keep it tight. No lectures, no therapy-speak, no "it's completely understandable that you feel..." padding."""
 
@@ -78,19 +82,46 @@ def load_history():
     return []
 
 
-def save_session(entry):
-    history = load_history()
-    history.insert(0, entry)  # newest first
+def write_history(history):
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2)
 
 
+def save_session(entry):
+    history = load_history()
+    history.insert(0, entry)  # newest first
+    write_history(history)
+
+
+def transcript_md(messages):
+    """Render the full conversation as markdown for the history file."""
+    parts = []
+    for m in messages:
+        who = "You" if m["role"] == "user" else "Straight Talk"
+        parts.append(f"**{who}:**\n\n{m['content']}")
+    return "\n\n---\n\n".join(parts)
+
+
+def ask(client, messages):
+    """Send the whole conversation (plus the system prompt) to the AI."""
+    reply = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+    )
+    return reply.choices[0].message.content
+
+
 # ---------------------------------------------------------------------------
-# Page setup
+# Page setup + conversation state
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="Straight Talk", page_icon="🪞", layout="centered")
 st.title("🪞 Straight Talk")
-st.caption("Tell both sides. Get the truth, not a cheerleader.")
+st.caption("Tell both sides. Get the truth, not a cheerleader — then keep asking.")
+
+# Conversation state survives reruns while the tab is open.
+for key, default in [("active", False), ("messages", []), ("meta", {})]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 # API key: sidebar field first, then Streamlit secrets, then environment.
 # (On Streamlit Cloud you paste the key once under Settings → Secrets.)
@@ -114,71 +145,95 @@ if history:
 else:
     st.sidebar.caption("Nothing yet — your reality checks will land here.")
 
-# ---------------------------------------------------------------------------
-# The form
-# ---------------------------------------------------------------------------
-category = st.selectbox("What's this about?", CATEGORIES)
-
-your_side = st.text_area(
-    "Your side — what happened, in your words",
-    height=150,
-    placeholder="Just tell it like you remember it. Include what was actually said or done, not just how it felt.",
-)
-
-their_side = st.text_area(
-    "Their side — the most honest version you can give",
-    height=150,
-    placeholder="If you had to argue THEIR case fairly, what would you say? What might they have been thinking or dealing with?",
-)
-
-outcome = st.text_input(
-    "What outcome do you want? (optional)",
-    placeholder="e.g. figure out if I'm overreacting, decide whether to confront them…",
-)
-
-level = st.slider("How direct should it be?", 1, 3, 2,
-                  help="1 Gentle · 2 Straight · 3 Brutal")
-label, tone = DIRECTNESS[level]
-st.caption(f"**{label}:** {tone}")
-
-go = st.button("Give it to me straight", type="primary", use_container_width=True)
 
 # ---------------------------------------------------------------------------
-# The call
+# Intake form — shown until the first assessment comes back
 # ---------------------------------------------------------------------------
-if go:
-    if not api_key:
-        st.error("Add your OpenAI API key in the sidebar first — the app can't think without one. (See README for where to get one.)")
-    elif not your_side.strip():
-        st.warning("Tell your side first — even a rough version works.")
-    else:
-        user_message = (
-            f"Category: {category}\n\n"
-            f"MY SIDE:\n{your_side.strip()}\n\n"
-            f"THEIR SIDE (my best honest version):\n{their_side.strip() or '(not provided)'}\n\n"
-            f"OUTCOME I WANT: {outcome.strip() or '(not specified)'}\n\n"
-            f"Directness level: {level} ({label}). {tone}"
-        )
+if not st.session_state.active:
+    category = st.selectbox("What's this about?", CATEGORIES)
+
+    your_side = st.text_area(
+        "Your side — what happened, in your words",
+        height=150,
+        placeholder="Just tell it like you remember it. Include what was actually said or done, not just how it felt.",
+    )
+
+    their_side = st.text_area(
+        "Their side — the most honest version you can give",
+        height=150,
+        placeholder="If you had to argue THEIR case fairly, what would you say? What might they have been thinking or dealing with?",
+    )
+
+    outcome = st.text_input(
+        "What outcome do you want? (optional)",
+        placeholder="e.g. figure out if I'm overreacting, decide whether to confront them…",
+    )
+
+    level = st.slider("How direct should it be?", 1, 3, 2,
+                      help="1 Gentle · 2 Straight · 3 Brutal")
+    label, tone = DIRECTNESS[level]
+    st.caption(f"**{label}:** {tone}")
+
+    if st.button("Give it to me straight", type="primary", use_container_width=True):
+        if not api_key:
+            st.error("Add your OpenAI API key in the sidebar first — the app can't think without one. (See README for where to get one.)")
+        elif not your_side.strip():
+            st.warning("Tell your side first — even a rough version works.")
+        else:
+            first_message = (
+                f"Category: {category}\n\n"
+                f"MY SIDE:\n{your_side.strip()}\n\n"
+                f"THEIR SIDE (my best honest version):\n{their_side.strip() or '(not provided)'}\n\n"
+                f"OUTCOME I WANT: {outcome.strip() or '(not specified)'}\n\n"
+                f"Directness level: {level} ({label}). {tone}"
+            )
+            st.session_state.messages = [{"role": "user", "content": first_message}]
+            try:
+                with st.spinner("Reading both sides…"):
+                    client = OpenAI(api_key=api_key)
+                    answer = ask(client, st.session_state.messages)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+                st.session_state.meta = {
+                    "time": datetime.now().strftime("%b %d, %I:%M %p"),
+                    "category": category,
+                    "your_side": your_side.strip(),
+                    "their_side": their_side.strip(),
+                    "directness": label,
+                }
+                save_session({**st.session_state.meta, "response": answer})
+                st.session_state.active = True
+                st.rerun()
+            except Exception as e:  # show the real error so you can learn from it
+                st.error(f"Something went wrong talking to the AI: {e}")
+
+# ---------------------------------------------------------------------------
+# Conversation view — full transcript plus a follow-up box
+# ---------------------------------------------------------------------------
+else:
+    if st.button("↩ Start over"):
+        st.session_state.active = False
+        st.session_state.messages = []
+        st.session_state.meta = {}
+        st.rerun()
+
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    followup = st.chat_input("Ask a follow-up — push back, add context, dig deeper…")
+    if followup:
+        st.session_state.messages.append({"role": "user", "content": followup})
         try:
-            with st.spinner("Reading both sides…"):
+            with st.spinner("Thinking…"):
                 client = OpenAI(api_key=api_key)
-                reply = client.chat.completions.create(
-                    model=MODEL,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_message},
-                    ],
-                )
-                answer = reply.choices[0].message.content
-            st.divider()
-            st.markdown(answer)
-            save_session({
-                "time": datetime.now().strftime("%b %d, %I:%M %p"),
-                "category": category,
-                "your_side": your_side.strip(),
-                "their_side": their_side.strip(),
-                "directness": label,
-                "response": answer,
-            })
-        except Exception as e:  # show the real error so you can learn from it
+                answer = ask(client, st.session_state.messages)
+            st.session_state.messages.append({"role": "assistant", "content": answer})
+            # keep the saved history entry in sync with the full conversation
+            history = load_history()
+            if history:
+                history[0]["response"] = transcript_md(st.session_state.messages)
+                write_history(history)
+            st.rerun()
+        except Exception as e:
             st.error(f"Something went wrong talking to the AI: {e}")
+            st.session_state.messages.pop()  # drop the failed question so retry is clean

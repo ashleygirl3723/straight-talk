@@ -27,7 +27,7 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 # Settings you can tweak while learning
 # ---------------------------------------------------------------------------
-MODEL = "meta-llama/llama-3.3-70b-instruct:free"  # open-weight model, free tier via OpenRouter (no card needed)
+MODEL = "google/gemma-4-31b-it:free"  # open-weight model, free tier via OpenRouter (no card needed)
 HISTORY_FILE = "history.json"  # past sessions are saved here so you can re-read them
 
 DIRECTNESS = {

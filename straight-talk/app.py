@@ -22,12 +22,12 @@ import os
 from datetime import datetime
 
 import streamlit as st
-from openai import OpenAI
+from huggingface_hub import InferenceClient
 
 # ---------------------------------------------------------------------------
 # Settings you can tweak while learning
 # ---------------------------------------------------------------------------
-MODEL = "gpt-4o-mini"          # cheap + plenty smart for this; swap for "gpt-4o" if you want
+MODEL = "meta-llama/Llama-3.3-70B-Instruct"  # open-weight model via Hugging Face free API (alt: "Qwen/Qwen2.5-72B-Instruct", no license click needed)
 HISTORY_FILE = "history.json"  # past sessions are saved here so you can re-read them
 
 DIRECTNESS = {
@@ -104,7 +104,7 @@ def transcript_md(messages):
 
 def ask(client, messages):
     """Send the whole conversation (plus the system prompt) to the AI."""
-    reply = client.chat.completions.create(
+    reply = client.chat_completion(
         model=MODEL,
         messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
     )
@@ -125,9 +125,9 @@ for key, default in [("active", False), ("messages", []), ("meta", {})]:
 
 # API key: sidebar field first, then Streamlit secrets, then environment.
 # (On Streamlit Cloud you paste the key once under Settings → Secrets.)
-api_key = st.sidebar.text_input("OpenAI API key", type="password",
+api_key = st.sidebar.text_input("Hugging Face token", type="password",
                                 help="Pasted here it lives only in this session. On Streamlit Cloud, use Settings → Secrets instead.")
-api_key = api_key or st.secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+api_key = api_key or st.secrets.get("HF_TOKEN") or os.environ.get("HF_TOKEN")
 
 # Sidebar: past sessions
 st.sidebar.divider()
@@ -176,7 +176,7 @@ if not st.session_state.active:
 
     if st.button("Give it to me straight", type="primary", use_container_width=True):
         if not api_key:
-            st.error("Add your OpenAI API key in the sidebar first — the app can't think without one. (See README for where to get one.)")
+            st.error("Add your Hugging Face token in the sidebar first — the app can't think without one. (Free at huggingface.co \u2192 Settings \u2192 Access Tokens.)")
         elif not your_side.strip():
             st.warning("Tell your story first — even a rough version works.")
         else:
@@ -190,7 +190,7 @@ if not st.session_state.active:
             st.session_state.messages = [{"role": "user", "content": first_message}]
             try:
                 with st.spinner("Reading your story…"):
-                    client = OpenAI(api_key=api_key)
+                    client = InferenceClient(token=api_key)
                     answer = ask(client, st.session_state.messages)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
                 st.session_state.meta = {
@@ -225,7 +225,7 @@ else:
         st.session_state.messages.append({"role": "user", "content": followup})
         try:
             with st.spinner("Thinking…"):
-                client = OpenAI(api_key=api_key)
+                client = InferenceClient(token=api_key)
                 answer = ask(client, st.session_state.messages)
             st.session_state.messages.append({"role": "assistant", "content": answer})
             # keep the saved history entry in sync with the full conversation

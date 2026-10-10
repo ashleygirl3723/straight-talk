@@ -27,7 +27,7 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 # Settings you can tweak while learning
 # ---------------------------------------------------------------------------
-MODEL = "google/gemma-4-31b-it:free"  # open-weight model, free tier via OpenRouter (no card needed)
+MODEL = "openrouter/free"  # OpenRouter auto-router: picks a working free open-weight model each call (no card needed)
 HISTORY_FILE = "history.json"  # past sessions are saved here so you can re-read them
 
 DIRECTNESS = {

@@ -22,12 +22,12 @@ import os
 from datetime import datetime
 
 import streamlit as st
-from huggingface_hub import InferenceClient
+from openai import OpenAI
 
 # ---------------------------------------------------------------------------
 # Settings you can tweak while learning
 # ---------------------------------------------------------------------------
-MODEL = "meta-llama/Llama-3.3-70B-Instruct"  # open-weight model via Hugging Face free API (alt: "Qwen/Qwen2.5-72B-Instruct", no license click needed)
+MODEL = "meta-llama/llama-3.3-70b-instruct:free"  # open-weight model, free tier via OpenRouter (no card needed)
 HISTORY_FILE = "history.json"  # past sessions are saved here so you can re-read them
 
 DIRECTNESS = {
@@ -104,7 +104,7 @@ def transcript_md(messages):
 
 def ask(client, messages):
     """Send the whole conversation (plus the system prompt) to the AI."""
-    reply = client.chat_completion(
+    reply = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
     )
@@ -125,9 +125,9 @@ for key, default in [("active", False), ("messages", []), ("meta", {})]:
 
 # API key: sidebar field first, then Streamlit secrets, then environment.
 # (On Streamlit Cloud you paste the key once under Settings → Secrets.)
-api_key = st.sidebar.text_input("Hugging Face token", type="password",
+api_key = st.sidebar.text_input("OpenRouter API key", type="password",
                                 help="Pasted here it lives only in this session. On Streamlit Cloud, use Settings → Secrets instead.")
-api_key = api_key or st.secrets.get("HF_TOKEN") or os.environ.get("HF_TOKEN")
+api_key = api_key or st.secrets.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 
 # Sidebar: past sessions
 st.sidebar.divider()
@@ -176,7 +176,7 @@ if not st.session_state.active:
 
     if st.button("Give it to me straight", type="primary", use_container_width=True):
         if not api_key:
-            st.error("Add your Hugging Face token in the sidebar first — the app can't think without one. (Free at huggingface.co \u2192 Settings \u2192 Access Tokens.)")
+            st.error("Add your OpenRouter API key in the sidebar first — the app can't think without one. (Free at openrouter.ai/keys, no credit card.)")
         elif not your_side.strip():
             st.warning("Tell your story first — even a rough version works.")
         else:
@@ -190,7 +190,7 @@ if not st.session_state.active:
             st.session_state.messages = [{"role": "user", "content": first_message}]
             try:
                 with st.spinner("Reading your story…"):
-                    client = InferenceClient(token=api_key)
+                    client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
                     answer = ask(client, st.session_state.messages)
                 st.session_state.messages.append({"role": "assistant", "content": answer})
                 st.session_state.meta = {
@@ -225,7 +225,7 @@ else:
         st.session_state.messages.append({"role": "user", "content": followup})
         try:
             with st.spinner("Thinking…"):
-                client = InferenceClient(token=api_key)
+                client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
                 answer = ask(client, st.session_state.messages)
             st.session_state.messages.append({"role": "assistant", "content": answer})
             # keep the saved history entry in sync with the full conversation
